@@ -1,0 +1,260 @@
+{
+  "name": "CSV Duplicate Checker",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "check-csv-duplicates",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "1a1a1a1a-0000-0000-0000-000000000001",
+      "name": "Webhook - New CSV",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -304,
+        0
+      ],
+      "webhookId": "check-csv-duplicates"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "2b2b2b2b-0000-0000-0000-000000000002",
+      "name": "Extract Rows From CSV",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        -64,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// EDIT THIS: set to the column in your CSV that uniquely identifies a row\nconst keyColumn = 'email';\n\nconst rows = items.map(i => i.json);\nconst keys = rows.map(r => r[keyColumn]).filter(v => v !== undefined && v !== null && v !== '');\n\nreturn [{ json: { rows, keys, keyColumn, totalRows: rows.length } }];"
+      },
+      "id": "3c3c3c3c-0000-0000-0000-000000000003",
+      "name": "Build Key List",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        192,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT email FROM your_table WHERE email = ANY($1)",
+        "options": {
+          "queryReplacement": "={{ [ $json.keys ] }}"
+        }
+      },
+      "id": "4d4d4d4d-0000-0000-0000-000000000004",
+      "name": "Check Duplicates (Postgres)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        432,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const original = $('Build Key List').first().json;\nconst matchedKeys = new Set($input.all().map(i => i.json[original.keyColumn]));\nconst duplicates = original.rows.filter(r => matchedKeys.has(r[original.keyColumn]));\n\nreturn [{\n  json: {\n    duplicates,\n    count: duplicates.length,\n    totalRows: original.totalRows\n  }\n}];"
+      },
+      "id": "5e5e5e5e-0000-0000-0000-000000000005",
+      "name": "Compare Against DB",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{ $json.count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "6f6f6f6f-0000-0000-0000-000000000006",
+      "name": "Has Duplicates?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        912,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "alerts@yourcompany.com",
+        "toEmail": "you@yourcompany.com",
+        "subject": "=⚠️ Duplicate rows found in CSV upload ({{ $json.count }})",
+        "emailFormat": "text",
+        "text": "=Found {{ $json.count }} duplicate row(s) out of {{ $json.totalRows }} total rows.\n\nDuplicates:\n{{ JSON.stringify($json.duplicates, null, 2) }}",
+        "options": {}
+      },
+      "id": "7g7g7g7g-0000-0000-0000-000000000007",
+      "name": "Send Duplicate Alert Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1152,
+        -128
+      ],
+      "webhookId": "ede73c9f-46d6-47e3-bc37-1c7544d65ded"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: \"duplicates_found\", count: $json.count, totalRows: $json.totalRows } }}",
+        "options": {}
+      },
+      "id": "8h8h8h8h-0000-0000-0000-000000000008",
+      "name": "Respond - Duplicates Found",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1392,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: \"ok\", message: \"no duplicates found\", totalRows: $json.totalRows } }}",
+        "options": {}
+      },
+      "id": "9i9i9i9i-0000-0000-0000-000000000009",
+      "name": "Respond - No Duplicates",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1152,
+        128
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook - New CSV": {
+      "main": [
+        [
+          {
+            "node": "Extract Rows From CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Rows From CSV": {
+      "main": [
+        [
+          {
+            "node": "Build Key List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Key List": {
+      "main": [
+        [
+          {
+            "node": "Check Duplicates (Postgres)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Duplicates (Postgres)": {
+      "main": [
+        [
+          {
+            "node": "Compare Against DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compare Against DB": {
+      "main": [
+        [
+          {
+            "node": "Has Duplicates?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Duplicates?": {
+      "main": [
+        [
+          {
+            "node": "Send Duplicate Alert Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - No Duplicates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Duplicate Alert Email": {
+      "main": [
+        [
+          {
+            "node": "Respond - Duplicates Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "23c5d915-e0da-42e3-94d8-6fee7b60aa64",
+  "meta": {
+    "instanceId": "ab94e7f0bf1b70bf859a57269c73dcfc79c85613b7368525539e5ced12c919dd"
+  },
+  "nodeGroups": [],
+  "id": "Fm4AwSFu8X6HMiBn",
+  "tags": []
+}
